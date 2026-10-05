@@ -952,10 +952,7 @@ VLM_SCHEMA_EXAMPLE_INSUFFICIENT_EVIDENCE = {
                                        "band in every subplot across all 45 visible cycles.",
     "evidence_quality": "weak",
 }
-# Third worked example: a multi-regime figure where regime switching dominates. Added because a
-# real run produced 'unreadable'-type figures on FD002/FD004 (6 operating regimes) yet the VLM
-# still emitted a confident 'high' band on ~85% of engines -- this example makes the honest
-# abstention path concrete instead of leaving 'high' as the path of least resistance.
+# Example for multi-regime figures where operating-condition banding hides any trend.
 VLM_SCHEMA_EXAMPLE_UNREADABLE = {
     "engine_id": 88, "degradation_trend": None, "degradation_regime": None,
     "stable_region_cycles": None, "unstable_region_cycles": None,

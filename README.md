@@ -25,8 +25,6 @@ flowchart LR
 3. **Fusion.** The final RUL is calculated in Python, not by a language model. Each model is weighted by the inverse of its validation RMSE, outliers are removed with a MAD rule, and the VLM's RUL band can shift the weights by at most 15%.
 4. **Evidence analysis.** Qwen2.5-7B-Instruct reads the predictions, the VLM output and the fused result, and gives a short assessment with an accept / caution / reject recommendation. It has no way to change the number.
 
-Every method is scored the same way, so the comparison covers the 8 individual models, a simple average, a validation-weighted average, constrained fusion without the VLM, and constrained fusion with the VLM.
-
 ## Files
 
 | File | Description |
@@ -65,7 +63,7 @@ To try things out quickly first, set `MAX_TEST_ENGINES_PER_SUBSET = 15`. These t
 
 ### Seeds
 
-The results in the paper are averaged over 3 seeds: 191, 1729 and 42. The notebook runs one seed at a time, so change `SEED` in the configuration cell and run it once per seed. Save or rename `/content/artifacts/` between runs, otherwise the next run will skip the finished subsets.
+The paper uses 3 seeds: 191, 1729 and 42. The notebook runs one seed at a time, so change `SEED` in the configuration cell and run it once per seed. Save or rename `/content/artifacts/` between runs, otherwise the next run will skip the finished subsets.
 
 ### Settings you might want to change
 
@@ -90,23 +88,6 @@ Each subset gets its own folder under `/content/artifacts/<SUBSET>/` with:
 - `run_summary.json`: everything above in one file
 
 The cross-subset comparison is saved in `/content/artifacts/summary/`.
-
-## Results
-
-RMSE in cycles, mean over 3 seeds.
-
-| Method | FD001 | FD002 | FD003 | FD004 |
-|---|---|---|---|---|
-| Best single model | | | | |
-| Constrained fusion (numeric only) | | | | |
-| Constrained fusion + VLM | | | | |
-
-## Notes and limitations
-
-- C-MAPSS has no label for when degradation actually starts. The VLM's terminal phase estimate is compared against the first cycle where RUL drops to 30 or below, which is a practical reference rather than ground truth.
-- The confidence score is a fixed weighted combination of model agreement and VLM output. It is not a calibrated probability.
-- Decoding is greedy and repeated inference gives identical results. Retraining the neural networks on a GPU can still give slightly different numbers, which is why results are averaged over 3 seeds.
-- The LLM explanations have not been checked against expert judgment yet.
 
 ## Citation
 

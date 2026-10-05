@@ -38,18 +38,12 @@
 
 
 # %%
-# ------------------------------------------------------------------
-# Early sanity check. A broken numpy/scipy ABI mismatch in THIS runtime (from numpy ever being
-# force-upgraded in this same VM) crashes deep inside unrelated imports later with a confusing
-# 10+ frame traceback. Catch it here, immediately, with a clear diagnosis instead.
-#
-# IMPORTANT: if this fires, "Runtime -> Restart session" will NOT fix it -- that only restarts
-# the Python process, it does not undo packages already installed on this VM's disk. You need
-# "Runtime -> Disconnect and delete runtime", then reconnect (a genuinely fresh VM).
-# ------------------------------------------------------------------
+# Check for a numpy/scipy binary mismatch before anything else is imported.
+# If this fails, restarting the session is not enough: use
+# Runtime -> Disconnect and delete runtime, then reconnect.
 try:
     import numpy as _np
-    import scipy as _scipy  # noqa: F401 -- the import alone is what triggers the ABI check
+    import scipy as _scipy  # noqa: F401
     del _np, _scipy
     print("[TITLE] Environment check\nnumpy/scipy import OK — no ABI mismatch detected in this runtime.")
 except AttributeError as _e:
@@ -78,14 +72,12 @@ def pip_install(*packages, quiet=True, upgrade=True):
         print(result.stderr[-2000:])
     return result.returncode == 0
 
-# These four are genuinely newer than what Colab ships (Qwen2.5-VL needs transformers>=4.49) —
-# safe/necessary to upgrade explicitly. None of them pin/force a numpy version.
+# Qwen2.5-VL needs transformers>=4.49, which is newer than the Colab default.
 pip_install("transformers>=4.49.0", "accelerate>=1.0.0")
-pip_install("bitsandbytes>=0.46.1", quiet=False)   # verbose: this is the package that most often fails silently
+pip_install("bitsandbytes>=0.46.1", quiet=False)   # verbose, to show install errors
 pip_install("qwen-vl-utils[decord]")
 
-# The rest of the scientific stack: install ONLY if missing, NEVER with -U, so an already-present,
-# Colab-tested numpy (and everything compiled against it) is never touched.
+# Install the rest only if missing and without upgrading, so Colab's numpy build is left alone.
 _stack = {"numpy": "numpy", "pandas": "pandas", "matplotlib": "matplotlib", "seaborn": "seaborn",
           "scipy": "scipy", "sklearn": "scikit-learn", "xgboost": "xgboost",
           "statsmodels": "statsmodels", "tqdm": "tqdm"}
@@ -103,7 +95,7 @@ else:
     print("numpy/pandas/matplotlib/seaborn/scipy/scikit-learn/xgboost/statsmodels/tqdm are all "
           "already present in this runtime — left untouched.")
 
-# Verify the quantization backend actually imports in THIS kernel.
+# Make sure bitsandbytes imports in this kernel.
 import importlib
 
 def _bnb_version():
@@ -157,9 +149,7 @@ torch.manual_seed(SEED)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(SEED)
-    # Deterministic cuDNN kernels (a modest, one-time perf cost, not a reason to skip it per the
-    # notebook's reproducibility requirement) -- combined with do_sample=False for every VLM/LLM
-    # generation call, this makes the whole pipeline reproducible run-to-run on the same hardware.
+    # Use deterministic cuDNN kernels.
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 if DEVICE == "cpu":
@@ -167,7 +157,7 @@ if DEVICE == "cpu":
           "VLM/LLM cells — two real 7B-class models in 4-bit need CUDA.")
 
 def banner(title, char="="):
-    # Used everywhere so every block of output is unambiguously titled.
+    # Prints a section header in the output.
     line = char * 78
     print(f"\n{line}\n{title}\n{line}")
 
@@ -179,12 +169,12 @@ if torch.cuda.is_available():
 
 # %%
 # ------------------------------------------------------------------
-# GLOBAL CONFIG — the single place you change things
+# Configuration
 # ------------------------------------------------------------------
 banner("[TITLE] Configuration")
 
-SUBSETS = ["FD001", "FD002", "FD003", "FD004"]     # processed automatically, in this order
-SKIP_ALREADY_COMPLETED_SUBSETS = True              # resume-safe: skip a subset whose run_summary.json already exists
+SUBSETS = ["FD001", "FD002", "FD003", "FD004"]     # run in this order
+SKIP_ALREADY_COMPLETED_SUBSETS = True              # skip subsets that already have run_summary.json
 
 DATA_ROOT     = "/content/cmapss"
 GRAPH_ROOT    = "/content/graphs"
@@ -199,22 +189,19 @@ RUL_CAP = 125
 WINDOW_SIZE = 30
 WINDOW_STRIDE = 1
 
-# How many TRAIN engines (per subset) also get a rendered graph, purely for visual sanity-
-# checking -- NOT passed through the VLM and NOT used in any metric. Set to 0 to skip, -1 for all.
+# Number of training engines to plot for visual checks only (not sent to the VLM).
+# 0 = none, -1 = all.
 N_TRAIN_ENGINES_FOR_VLM = 10
 
-# Quick-validation mode: cap how many TEST engines per subset go through the VLM/fusion/eval path.
-# None = full run (all test engines, as used for real results). Set to e.g. 15 to sanity-check a
-# prompt/graph change cheaply (minutes, not hours) before committing to a full multi-hour re-run.
-# Runs in this mode are clearly marked in the saved run_summary.json (quick_validation: true) and
-# SHOULD NOT be reported as results -- they exist only to validate a change before the real run.
+# Limit the number of test engines per subset for a quick test run. None = all engines.
+# Quick runs are saved to a separate folder and flagged in run_summary.json.
 MAX_TEST_ENGINES_PER_SUBSET = None
 
-USE_4BIT = True               # 4-bit quantization for the VLM / fusion LLM (recommended on L4/T4)
-MAX_LLM_RETRIES = 3            # re-prompt the SAME real model this many times on invalid JSON before giving up
+USE_4BIT = True               # 4-bit quantization for both language models
+MAX_LLM_RETRIES = 3            # retries when a response is not valid JSON
 
 VLM_MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
-FUSION_LLM_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"   # separate text-only agent; set to VLM_MODEL_ID to reuse one model's text tower
+FUSION_LLM_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"   # set to VLM_MODEL_ID to use one model for both
 
 ML_DL_MODEL_LIST = ["LinearRegression", "RandomForest", "XGBoost",
                      "BiLSTM", "TCN", "MS-TCN", "MS-TCN+BiLSTM", "Transformer"]
@@ -226,7 +213,7 @@ CONFIG_SNAPSHOT = {
     "max_llm_retries": MAX_LLM_RETRIES, "vlm_model_id": VLM_MODEL_ID,
     "evidence_analysis_llm_model_id": FUSION_LLM_MODEL_ID,
     "ml_dl_model_list": ML_DL_MODEL_LIST, "seed": SEED,
-    # --- methodology flags, recorded so a saved run is self-describing ---
+    # --- method settings saved with each run ---
     "final_rul_computed_by": "deterministic constrained_fusion() in Python (never LLM-generated)",
     "fusion_weighting": "w_i proportional to 1/validation_RMSE_i, MAD outlier down-weighting, "
                          "w_i >= 0 and sum(w_i) == 1",
@@ -277,7 +264,7 @@ assert os.path.exists(ZIP_PATH), f"Zip not found at {ZIP_PATH}"
 with zipfile.ZipFile(ZIP_PATH, "r") as zf:
     zf.extractall(DATA_ROOT)
 
-# The official archive sometimes nests files one directory deeper — flatten if so.
+# Some copies of the archive have a nested folder; move the files up if so.
 found_txt = glob.glob(os.path.join(DATA_ROOT, "**", "*.txt"), recursive=True)
 for fp in found_txt:
     target = os.path.join(DATA_ROOT, os.path.basename(fp))
@@ -297,19 +284,14 @@ for _s in SUBSETS:
 
 # %%
 # ------------------------------------------------------------------
-# C-MAPSS schema + loader (subset-parameterized; no globals depend on a single subset)
+# C-MAPSS column names and loader
 # ------------------------------------------------------------------
 BASE_COLS = ["unit", "cycle", "op1", "op2", "op3"]
 SENSOR_COLS = [f"s{i}" for i in range(1, 22)]
 ALL_COLS = BASE_COLS + SENSOR_COLS
 
-# The VLM branch must see ALL 21 original sensors, unfiltered -- it is a separate, minimally
-# processed path from the ML/DL branch (which drops near-constant sensors per subset via
-# drop_low_variance_sensors below, fit on that subset's training data). VLM_SENSORS is used
-# EVERYWHERE a graph is rendered for the VLM; ACTIVE_SENSORS (computed per-subset later) is used
-# ONLY for the numerical models. This separation is load-bearing: it is what makes it factually
-# true, not just a design intention, that the VLM sees the complete raw sensor set rather than a
-# version already filtered for the numerical branch.
+# The VLM is shown all 21 sensors. Low-variance sensors are dropped only for the
+# numerical models (ACTIVE_SENSORS, computed per subset).
 VLM_SENSORS = SENSOR_COLS.copy()
 
 # Number of operating regimes per subset (FD001/FD003: 1 regime; FD002/FD004: 6 regimes)
@@ -414,11 +396,8 @@ class TCNRUL(nn.Module):
 
 
 class MSTCNStage(nn.Module):
-    # One stage of a Multi-Stage TCN (Farha & Gall, 2019): a stack of dilated residual conv
-    # blocks that maps its input to a per-timestep OUTPUT of `out_ch` channels. What makes a
-    # network "multi-stage" (vs. just a deeper single-stage TCN) is that subsequent stages
-    # consume the previous stage's per-timestep OUTPUT, not its hidden features or the raw input
-    # — each stage's job is to refine the previous stage's per-timestep estimate.
+    # One MS-TCN stage (Farha & Gall, 2019). Each later stage takes the previous
+    # stage's per-timestep output as its input.
     def __init__(self, in_ch, hidden_ch, out_ch, kernel_size=3, num_layers=4, dropout=0.2):
         super().__init__()
         layers, ch = [], in_ch
@@ -433,10 +412,8 @@ class MSTCNStage(nn.Module):
 
 
 class MSTCN(nn.Module):
-    # Multi-Stage TCN adapted from per-frame classification (its original action-segmentation
-    # setting) to sequence-to-one RUL regression: stage 1 processes the raw windowed sensor
-    # sequence, each following stage refines the PREVIOUS stage's per-timestep output, and the
-    # final stage's last-timestep hidden feature feeds a regression head.
+    # MS-TCN adapted for RUL regression: the last time step of the final stage
+    # feeds a regression head.
     def __init__(self, n_features, num_stages=3, hidden_ch=64, kernel_size=3, num_layers=4, dropout=0.2):
         super().__init__()
         self.stage1 = MSTCNStage(n_features, hidden_ch, hidden_ch, kernel_size, num_layers, dropout)
@@ -449,15 +426,12 @@ class MSTCN(nn.Module):
     def forward(self, x):   # x: (batch, time, features)
         out, feat = self.stage1(x.transpose(1, 2))
         for stage in self.refine_stages:
-            out, feat = stage(out)     # each stage refines the previous stage's OUTPUT
+            out, feat = stage(out)     # refine the previous stage's output
         return self.head(feat[:, :, -1]).squeeze(-1)
 
 
 class MSTCNBiLSTM(nn.Module):
-    # Hybrid: the same multi-stage temporal-refinement branch as MSTCN, concatenated with an
-    # independent BiLSTM branch over the raw sequence, following the common RUL-literature
-    # pattern of combining a convolutional/temporal feature extractor with a recurrent one before
-    # the regression head.
+    # MS-TCN branch and a BiLSTM branch, concatenated before the regression head.
     def __init__(self, n_features, num_stages=3, tcn_hidden=64, lstm_hidden=32,
                  kernel_size=3, num_layers=4, dropout=0.2):
         super().__init__()
@@ -493,8 +467,7 @@ class PositionalEncoding(nn.Module):
 
 
 class TransformerRUL(nn.Module):
-    # Temporal / trend-guided transformer (TGT-style): a projection + positional encoding +
-    # a standard transformer encoder + attention-pooled regression head.
+    # Transformer encoder with positional encoding and attention pooling.
     def __init__(self, n_features, d_model=64, nhead=4, num_layers=3, dropout=0.2):
         super().__init__()
         self.proj = nn.Linear(n_features, d_model)
@@ -514,7 +487,7 @@ class TransformerRUL(nn.Module):
 
 
 def build_dl_models(n_features):
-    # Fresh instances each call -> fresh weight init. Called once per subset.
+    # New, untrained models for each subset.
     return {
         "BiLSTM": BiLSTMRUL(n_features),
         "TCN": TCNRUL(n_features),
@@ -525,8 +498,7 @@ def build_dl_models(n_features):
 
 
 def train_dl_model(model, name, train_loader, val_loader, epochs=60, lr=1e-3, patience=8, seed=SEED):
-    # Reseed here (not just once globally) so each model's DataLoader shuffle order and any
-    # stochastic op inside training is independently reproducible regardless of what ran before.
+    # Reseed so each model starts from the same state regardless of what ran before.
     torch.manual_seed(seed)
     model = model.to(DEVICE)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
@@ -581,18 +553,12 @@ def predict_test(model, test_loader):
 def verify_reproducibility(subset, dl_models_trained, test_loader, run_vlm_fn=None,
                             test_graph_paths=None, n_vlm_check=2):
     """
-    Runs a bounded, real determinism check and reports max/mean numerical differences -- this is
-    the notebook's answer to "can I run the same configuration twice and get the same result."
+    Re-runs inference to check that results repeat.
 
-    1. DL models (cheap, no GPU generation involved): re-run inference twice through each already-
-       trained model in eval() mode and diff the outputs. With dropout disabled by .eval() and no
-       other stochastic ops at inference time, this should be exactly 0.0 -- if it isn't, that's a
-       real reproducibility bug worth knowing about, which is exactly why this check exists rather
-       than just asserting it.
-    2. VLM (bounded cost: only n_vlm_check engines, not all of them, since a real generation call
-       is expensive): re-run the real VLM on a couple of already-rendered images and diff the
-       parsed confidence value + trend/qualitative_rul string agreement. Requires run_vlm_fn and
-       test_graph_paths; skipped (not faked) if either is unavailable.
+    1. Each trained DL model predicts the test set twice; the max and mean differences
+       are reported (expected to be 0 in eval mode).
+    2. The VLM is re-run on n_vlm_check engines and its structured fields are compared.
+       Skipped if run_vlm_fn or test_graph_paths is not given.
     """
     banner(f"[TITLE] {subset} — Reproducibility verification")
     report = {"subset": subset, "dl_model_determinism": {}, "vlm_determinism": None}
@@ -667,7 +633,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.cluster import KMeans
 
 def fit_regime_normalizers(train_df, sensor_cols, n_regimes, seed=SEED):
-    # Fit on TRAIN ONLY. Returns (kmeans_or_None, {regime_id: fitted MinMaxScaler}).
+    # Fit on training data only. Returns (kmeans or None, {regime_id: MinMaxScaler}).
     if n_regimes <= 1:
         return None, {0: MinMaxScaler().fit(train_df[sensor_cols])}
     km = KMeans(n_clusters=n_regimes, random_state=seed, n_init=10)
@@ -707,8 +673,8 @@ def add_test_rul(df, rul_table, rul_cap):
 
 
 def create_sequences(df, sensor_cols, window, stride, is_train):
-    # Sliding-window sequences per engine. Short trajectories (< window) are left-padded by
-    # repeating the first observed row (standard trick, e.g. Zheng et al. 2017 / Li et al. 2018).
+    # Sliding windows per engine. Engines shorter than the window are padded
+    # by repeating the first row (as in Zheng et al. 2017; Li et al. 2018).
     X, y, meta = [], [], []
     for unit, g in df.groupby("unit"):
         g = g.sort_values("cycle")
@@ -726,13 +692,13 @@ def create_sequences(df, sensor_cols, window, stride, is_train):
                 y.append(ruls[start + window - 1])
                 meta.append((unit, cycles[start + window - 1]))
         else:
-            X.append(arr[-window:])   # only the final window per test engine (what we evaluate on)
+            X.append(arr[-window:])   # last window only for test engines
             y.append(ruls[-1])
             meta.append((unit, cycles[-1]))
     return np.array(X, dtype=np.float32), np.array(y, dtype=np.float32), meta
 
 def create_tabular_features(df, sensor_cols, window, stride, is_train):
-    # Summary-statistic features per window (mean/std/last/slope) for the ML baselines.
+    # Window statistics (mean, std, last value, slope) for the tabular models.
     Xs, y, meta = create_sequences(df, sensor_cols, window, stride, is_train)
     n, w, s = Xs.shape
     t = np.arange(w)
@@ -769,8 +735,7 @@ def generate_engine_graph(unit_df, unit_id, split, sensor_cols, out_dir, dpi=150
 
     cycles = unit_df["cycle"].values
     n_cycles = len(cycles)
-    # Adaptive smoothing window: ~10% of the trajectory length, clamped to a sane range so short
-    # test trajectories still get some smoothing and long ones don't over-smooth away real drift.
+    # Smoothing window of about 10% of the record length, between 5 and 25 cycles.
     smooth_window = int(np.clip(n_cycles // 10, 5, 25))
 
     def _smoothed(values):
@@ -778,23 +743,17 @@ def generate_engine_graph(unit_df, unit_id, split, sensor_cols, out_dir, dpi=150
             smooth_window, center=True, min_periods=1).mean().values
 
     def _style_x_axis(ax):
-        # Major gridlines (labeled, ~6 round numbers) give orientation; minor gridlines (unlabeled,
-        # 4 per major interval) give intermediate reference points so an onset estimate can land
-        # BETWEEN two round numbers instead of only ever matching a labeled tick -- without this,
-        # a model reading the chart has nothing to anchor a non-round answer to.
+        # Labeled major ticks plus unlabeled minor gridlines for reading cycle numbers.
         ax.xaxis.set_major_locator(MaxNLocator(nbins=6, integer=True))
         ax.xaxis.set_minor_locator(AutoMinorLocator(4))
         ax.tick_params(labelsize=7)
         ax.grid(True, which="major", axis="x", alpha=0.35, linewidth=0.6)
         ax.grid(True, which="minor", axis="x", alpha=0.15, linewidth=0.4, linestyle=":")
 
-    # --- DISPLAY-ONLY regime handling -------------------------------------------------
-    # Detect whether this engine's operating settings form discrete clusters (FD002/FD004 have 6
-    # operating conditions; FD001/FD003 have 1). If they do, the raw traces split into parallel
-    # bands that visually dominate any degradation trend. We therefore ALSO plot a within-regime
-    # z-scored trace, which removes the between-band offset for VIEWING ONLY. Nothing is dropped:
-    # the raw line and its smoothed trend remain on every panel exactly as before, and none of
-    # this touches the numerical branch (which does its own regime normalisation separately).
+    # --- Regime handling (display only) ---
+    # FD002/FD004 run under several operating conditions, which splits the raw traces into
+    # bands. An extra panel shows each sensor z-scored within its regime so trends are visible.
+    # This only affects the figure, not the numerical models.
     _op_cols = [c for c in ("op1", "op2", "op3") if c in unit_df.columns]
     _regime_id = None
     if _op_cols:
@@ -827,7 +786,7 @@ def generate_engine_graph(unit_df, unit_id, split, sensor_cols, out_dir, dpi=150
         ax.set_title(sensor, fontsize=10)
         ax.set_xlabel("cycle", fontsize=8)
         _style_x_axis(ax)
-    axes[0].legend(fontsize=6, loc="best")   # explain the two line styles once, not on every panel
+    axes[0].legend(fontsize=6, loc="best")   # legend on the first panel only
 
     ax = axes[n_sensors]
     for sensor in sensor_cols:
@@ -1075,9 +1034,7 @@ def validate_vlm_output(parsed, valid_sensor_names=VLM_SENSORS):
                 errors.append("Key 'confidence' must be a float between 0.0 and 1.0 (or null).")
         except (TypeError, ValueError):
             errors.append("Key 'confidence' must be a number or null.")
-    # Validate any reported sensor names against the actual sensor set the VLM was shown -- this
-    # catches hallucinated sensor names (e.g. a sensor that doesn't exist, or a typo) before they
-    # ever reach the fusion layer or a saved artifact.
+    # Reject sensor names that are not in the figure.
     abnormal = parsed.get("abnormal_sensors")
     if abnormal:
         if not isinstance(abnormal, list):
@@ -1105,7 +1062,7 @@ def load_real_vlm():
     vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         VLM_MODEL_ID, torch_dtype="auto", device_map="auto", quantization_config=quant_cfg)
     vlm_model.eval()
-    # Raise max_pixels so the dense multi-panel figures keep their detail after resizing
+    # Raise max_pixels so the dense multi-panel figures keep their detail after resizing.
     vlm_processor = AutoProcessor.from_pretrained(
         VLM_MODEL_ID, min_pixels=256 * 28 * 28, max_pixels=2048 * 28 * 28)
     assert next(vlm_model.parameters()).is_cuda or DEVICE == "cpu", "VLM did not load onto CUDA"
@@ -1139,8 +1096,7 @@ def _generate_vlm_once(image_path, unit_id, split, prior_errors=None, max_new_to
                                        clean_up_tokenization_spaces=False)[0]
 
 def run_vlm(image_path, unit_id, split):
-    # Always the real model. On invalid/non-conformant JSON, re-prompt the SAME model with the
-    # validation errors up to MAX_LLM_RETRIES times. No mock/synthetic fallback at any point.
+    # Re-prompt the model with the validation errors, up to MAX_LLM_RETRIES times.
     errors, last_raw, parsed = None, "", None
     for attempt in range(MAX_LLM_RETRIES + 1):
         raw_text = _generate_vlm_once(image_path, unit_id, split, prior_errors=errors)
@@ -1266,10 +1222,8 @@ def _generate_fusion_once(unit_id, preds_by_model, val_rmse, vlm_obs, constraine
     return fusion_llm_tokenizer.decode(out[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
 def run_llm_evidence_analysis(unit_id, preds_by_model, val_rmse, vlm_obs, constrained_result):
-    # Always the real model, with retry-on-validation-error. No mock/synthetic fallback. This
-    # function returns TEXT ANALYSIS ONLY -- it has no numeric RUL field to parse or use, by
-    # construction (see FUSION_ALLOWED_KEYS above), so there is nothing here that could silently
-    # override the deterministic fusion result even by accident.
+    # Same retry logic as run_vlm. The output schema has no numeric RUL field, so this
+    # step cannot change the fused prediction.
     errors, last_raw, parsed = None, "", None
     for attempt in range(MAX_LLM_RETRIES + 1):
         raw = _generate_fusion_once(unit_id, preds_by_model, val_rmse, vlm_obs, constrained_result,
@@ -1312,8 +1266,7 @@ print("Evidence-analysis prompt/schema/retry logic ready: "
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 def nasa_score(y_true, y_pred):
-    # Asymmetric NASA PHM08 scoring function: penalizes late (over-)predictions more heavily
-    # than early (under-)predictions, matching the real cost asymmetry of missed maintenance.
+    # NASA PHM08 score: late predictions are penalized more than early ones.
     d = np.asarray(y_pred) - np.asarray(y_true)
     s = np.where(d < 0, np.exp(-d / 13.0) - 1, np.exp(d / 10.0) - 1)
     return float(np.sum(s))
@@ -1326,15 +1279,13 @@ def regression_metrics(y_true, y_pred):
     return {"RMSE": rmse, "MAE": mae, "NASA_score": nasa_score(y_true, y_pred), "Pearson_r": corr}
 
 
-# Mapping from the VLM's qualitative_rul category to a numeric RUL range. This is a FIXED SCORING
-# CONVENTION used only to check whether a numeric prediction falls inside the VLM's stated band
-# (band_consistency below) and to bound the VLM's adjustment in constrained_fusion -- it is not a
-# claim that the VLM performs numeric regression, and these ranges are not independently validated.
+# RUL range assigned to each qualitative band. Used only to compare numeric predictions with
+# the VLM's band and to set the size of the VLM weight adjustment.
 QUAL_BAND_TO_RANGE = {"critical": (0, 20), "low": (0, 50), "medium": (30, 90), "high": (60, 200)}
 
 def band_consistency(numeric_pred, qual_band):
     if qual_band is None:
-        return 0.5   # VLM explicitly abstained -- neutral, not a penalty
+        return 0.5   # no VLM band: neutral
     lo, hi = QUAL_BAND_TO_RANGE.get(qual_band, (0, 200))
     if lo <= numeric_pred <= hi:
         return 1.0
@@ -1350,11 +1301,8 @@ def weighted_average_fusion(preds_by_model, val_rmse):
     return float(np.average(vals, weights=weights))
 
 
-# How much the VLM's qualitative evidence is allowed to move a model's fusion weight, as a
-# fraction of that weight -- e.g. 0.15 means a model whose own prediction is maximally consistent
-# with the VLM's stated band gets up to +15% weight, and a maximally inconsistent one gets up to
-# -15%, before renormalization. Fixed and documented, never tuned against test results -- the VLM
-# can nudge the fusion; by construction it cannot dominate or override it.
+# Maximum relative change the VLM band can make to a model's weight (+/-15%),
+# applied before the weights are renormalized.
 VLM_ADJUSTMENT_BOUND = 0.15
 CONFIG_SNAPSHOT["vlm_adjustment_bound"] = VLM_ADJUSTMENT_BOUND
 with open(os.path.join(ARTIFACT_ROOT, "summary", "config.json"), "w") as _f:
@@ -1362,18 +1310,12 @@ with open(os.path.join(ARTIFACT_ROOT, "summary", "config.json"), "w") as _f:
 
 def constrained_fusion(preds_by_model, val_rmse, vlm_obs=None, vlm_adjustment_bound=VLM_ADJUSTMENT_BOUND):
     """
-    Deterministic, fully reproducible fusion of ML/DL predictions. Given the same inputs, this
-    ALWAYS returns the same output -- no sampling, no LLM call, no free-form generation anywhere.
+    Deterministic fusion of the ML/DL predictions.
 
-    w_i is proportional to 1 / validation_RMSE_i (models with lower held-out validation error get
-    more weight), with models flagged as outliers by a Median-Absolute-Deviation rule excluded
-    (weight 0). If vlm_obs is given, weights get one additional BOUNDED adjustment
-    (VLM_ADJUSTMENT_BOUND) based on how consistent each model's OWN prediction is with the VLM's
-    qualitative_rul band -- this is the only way visual evidence enters the numeric result, and it
-    is capped so it can only nudge, never override, the validation-driven weighting.
-
-    Weights always satisfy w_i >= 0 and sum(w_i) == 1. final_rul = sum(w_i * pred_i).
-    Pass vlm_obs=None for the VLM-free variant ("numerical models only" in the ablation table).
+    Weights are proportional to 1 / validation RMSE, with MAD outliers set to zero. If vlm_obs
+    is given, each weight is scaled by up to +/-vlm_adjustment_bound depending on how well that
+    model's prediction matches the VLM's qualitative band. Weights are non-negative and sum to 1.
+    Pass vlm_obs=None for the numeric-only version.
     """
     names = list(preds_by_model.keys())
     vals = np.array([preds_by_model[n] for n in names])
@@ -1389,23 +1331,18 @@ def constrained_fusion(preds_by_model, val_rmse, vlm_obs=None, vlm_adjustment_bo
 
     qual_band = vlm_obs.get("qualitative_rul") if vlm_obs else None
     if vlm_obs is not None and qual_band is not None:
-        # Per-model consistency with the VLM's band. NOTE: band_consistency() saturates at 0.0
-        # once a prediction is far outside the band, so if EVERY model is far outside (the case
-        # where the VLM most strongly disagrees with the numerical branch) the raw scores are all
-        # identical and the adjustment would cancel out completely in the renormalization below --
-        # i.e. the VLM's evidence would silently have no effect precisely when it dissents most.
-        # To avoid that, rank models by their signed distance to the VLM's band instead, and spread
-        # the adjustment across that ranking. When the raw scores DO differ, they are used directly.
+        # Score each model by how well its prediction matches the VLM band. If all models get
+        # the same score (e.g. all far outside the band), rank them by distance to the band
+        # centre instead so the adjustment does not cancel out.
         per_model_consistency = np.array([band_consistency(preds_by_model[n], qual_band) for n in names])
         if len(names) > 1 and float(np.ptp(per_model_consistency)) < 1e-9:
             lo, hi = QUAL_BAND_TO_RANGE.get(qual_band, (0, 200))
             band_mid = 0.5 * (lo + hi)
             dist = np.array([abs(preds_by_model[n] - band_mid) for n in names])
             if float(np.ptp(dist)) > 1e-9:
-                # nearest-to-band -> 1.0, farthest -> 0.0 (relative, not absolute)
+                # nearest to the band -> 1.0, farthest -> 0.0
                 per_model_consistency = 1.0 - (dist - dist.min()) / (dist.max() - dist.min())
-            # if distances are also all identical, the models are interchangeable w.r.t. the VLM
-            # and leaving the adjustment neutral is the correct behavior.
+            # all distances equal: leave the weights unchanged
         adjustment = 1.0 + vlm_adjustment_bound * (2.0 * per_model_consistency - 1.0)  # -> [1-bound, 1+bound]
         weights_raw = base_w * adjustment
     else:
@@ -1434,12 +1371,9 @@ def constrained_fusion(preds_by_model, val_rmse, vlm_obs=None, vlm_adjustment_bo
 def compute_confidence_score(agreement, vlm_consistency, vlm_confidence,
                               w_agreement=0.5, w_consistency=0.3, w_vlm_conf=0.2):
     """
-    A deterministic RELIABILITY HEURISTIC in [0,1] -- NOT a calibrated probability. Combines,
-    with fixed and documented weights (never tuned against test-set outcomes): (1) numerical model
-    agreement, (2) consistency between the fused numeric prediction and the VLM's qualitative
-    band, and (3) the VLM's own self-reported evidence confidence. See Section 9's reliability
-    analysis for how well this score empirically tracks accuracy -- a distinct and weaker claim
-    than formal probability calibration.
+    Confidence score in [0, 1] from fixed weights: model agreement (0.5), VLM band
+    consistency (0.3) and VLM self-reported confidence (0.2). This is a heuristic,
+    not a calibrated probability.
     """
     vlm_consistency = 0.5 if vlm_consistency is None else vlm_consistency
     vlm_confidence = 0.5 if vlm_confidence is None else vlm_confidence
@@ -1448,14 +1382,8 @@ def compute_confidence_score(agreement, vlm_consistency, vlm_confidence,
 
 
 def reliability_table(df, pred_col, conf_col, n_bins=5, error_threshold=15.0):
-    # TERMINOLOGY NOTE: this reports whether a stated confidence score empirically tracks
-    # accuracy (a reliability-diagram-style analysis) -- NOT formal probability calibration (e.g.
-    # Guo et al. 2017's definition, which requires the score to BE a probability of correctness
-    # under a proper scoring rule); we do not claim that here, see compute_confidence_score above.
-    # Evaluated on the TEST set, which is standard practice for reporting a fixed method's
-    # behavior (same as reporting test RMSE) -- not leakage, since nothing here is fit, tuned, or
-    # selected using these numbers; the confidence formula and its weights are fixed in code
-    # before any test-set result is computed.
+    # Compares the confidence score with the share of predictions within error_threshold cycles
+    # of the true RUL, per confidence bin. A reliability check, not probability calibration.
     d = df[[pred_col, conf_col, "true_rul"]].dropna().copy()
     d["abs_err"] = (d[pred_col] - d["true_rul"]).abs()
     d["correct"] = (d["abs_err"] <= error_threshold).astype(int)
@@ -1477,8 +1405,7 @@ def _fmt(x, spec=".2f", default="n/a"):
         return default
 
 def sensor_arrow(unit_id, sensor, raw_df):
-    # Direction is computed from the actual raw sensor data (not asked of the VLM/LLM) -- the VLM
-    # tells us WHICH sensors are abnormal, the data tells us the real direction of movement.
+    # Arrow direction from the slope of the raw sensor data.
     g = raw_df[raw_df.unit == unit_id].sort_values("cycle")
     if sensor not in g.columns or len(g) < 2:
         return "→"
@@ -1507,8 +1434,7 @@ def run_subset_pipeline(subset):
     t_subset_start = time.time()
     banner(f"[TITLE] {subset} — PIPELINE START", char="#")
 
-    # Quick-validation runs write to a physically separate directory so they can never be mistaken
-    # for -- or accidentally satisfy the resume/skip check for -- a real full run of this subset.
+    # Quick test runs go to a separate folder so they are not mixed with full runs.
     _dir_suffix = "" if MAX_TEST_ENGINES_PER_SUBSET is None else "_quickcheck"
     subset_graph_dir = os.path.join(GRAPH_ROOT, subset + _dir_suffix)
     subset_artifact_dir = os.path.join(ARTIFACT_ROOT, subset + _dir_suffix)
@@ -1536,10 +1462,8 @@ def run_subset_pipeline(subset):
     train_norm = add_piecewise_rul(train_norm, RUL_CAP)
     test_norm = add_test_rul(test_norm, rul_df, RUL_CAP)
 
-    # RUL-cap transparency: both the TRAINING target and the TEST evaluation ground truth are
-    # capped at RUL_CAP (standard C-MAPSS convention, Heimes 2008 / Li et al. 2018, used for
-    # comparability with published baselines) -- report how many test engines this actually
-    # affects so the capping is a visible, deliberate choice rather than a silent side effect.
+    # Training targets and test labels are both capped at RUL_CAP (standard for C-MAPSS).
+    # Report how many test engines this affects.
     _last_test_rows = test_norm.sort_values(["unit", "cycle"]).groupby("unit").tail(1)
     _n_capped_test = int((_last_test_rows["RUL"] >= RUL_CAP).sum())
     print(f"RUL_CAP={RUL_CAP}: {_n_capped_test}/{len(_last_test_rows)} test engines have a true "
@@ -1671,9 +1595,7 @@ def run_subset_pipeline(subset):
         print(f"  {k:18s} {v:6.2f}")
 
     # ---------------- Reproducibility check ----------------
-    # dl_models holds the SAME (now-trained) model objects that model_test_preds was built from
-    # (train_dl_model mutates and returns the model it was given, in place), so this genuinely
-    # re-exercises the trained models, not fresh/untrained copies.
+    # dl_models holds the trained models (train_dl_model trains them in place).
     repro_report = verify_reproducibility(subset, dl_models, test_loader,
                                            run_vlm_fn=run_vlm, test_graph_paths=test_graph_paths,
                                            n_vlm_check=2)
@@ -1689,21 +1611,18 @@ def run_subset_pipeline(subset):
 
         avg = simple_average_fusion(preds_by_model)
         wavg = weighted_average_fusion(preds_by_model, model_val_rmse)
-        # Numeric-only deterministic fusion ("numerical models only" in the ablation table) ...
+        # Constrained fusion without VLM evidence
         constrained = constrained_fusion(preds_by_model, model_val_rmse, vlm_obs=None)
-        # ... and the same deterministic mechanism with the VLM's bounded adjustment applied --
-        # this second one is the proposed framework's numeric answer.
+        # Constrained fusion with VLM evidence (proposed method)
         constrained_vlm = constrained_fusion(preds_by_model, model_val_rmse, vlm_obs=vlm_obs)
         confidence_score = compute_confidence_score(
             constrained_vlm["agreement"], constrained_vlm["vlm_consistency"],
             vlm_obs.get("confidence") if vlm_obs else None)
 
-        # --- VLM/numeric conflict record (diagnostic only; changes no numeric result) ---
-        # Recorded rather than resolved: where the visual evidence disagrees with the numerical
-        # consensus we log the disagreement instead of forcing either side to yield.
+        # Record whether the VLM band agrees with the numeric estimate (diagnostic only).
         _vlm_band = vlm_obs.get("qualitative_rul") if vlm_obs else None
         _band_lo, _band_hi = QUAL_BAND_TO_RANGE.get(_vlm_band, (None, None))
-        _numeric_ref = constrained["final_rul"]        # VLM-free number, so this is an honest comparison
+        _numeric_ref = constrained["final_rul"]        # numeric-only estimate
         if _vlm_band is None:
             _conflict_status = "vlm_abstained"
             _conflict_margin = None
@@ -1714,8 +1633,7 @@ def run_subset_pipeline(subset):
             _conflict_status = "conflict"
             _conflict_margin = float(min(abs(_numeric_ref - _band_lo), abs(_numeric_ref - _band_hi)))
 
-        # The real LLM analyzes the evidence and the already-computed deterministic result; it
-        # does not (and structurally cannot, see FUSION_ALLOWED_KEYS) return a numeric RUL.
+        # LLM commentary on the evidence and the fused result.
         llm_evidence, llm_raw = run_llm_evidence_analysis(
             unit_id, preds_by_model, model_val_rmse, vlm_obs, constrained_vlm)
 
@@ -1764,8 +1682,7 @@ def run_subset_pipeline(subset):
         })
 
     fusion_df = pd.DataFrame(fusion_records)
-    # raw LLM evidence-analysis text is saved as its own artifact (matching how raw VLM text is
-    # saved), not left only inside the main results table.
+    # Save the raw LLM text separately, like the raw VLM text.
     with open(os.path.join(subset_artifact_dir, "fusion_llm_raw_text.json"), "w") as f:
         json.dump({str(r["unit"]): r["_llm_raw_text"] for r in fusion_records}, f, indent=2)
     fusion_df = fusion_df.drop(columns=["_llm_raw_text"])
@@ -1844,9 +1761,7 @@ def _evaluate_and_save_subset(subset, subset_artifact_dir, t_subset_start, train
     plt.show()
 
     # ---------------- 9.2 Ablation study ----------------
-    # Isolates each ingredient's contribution. Reported honestly: if adding the VLM or the
-    # constrained fusion does not help on this subset, the delta column shows that as a negative
-    # number rather than being hidden or reframed.
+    # RMSE change at each stage relative to the best single model.
     best_single_model = metrics_table.loc[
         [m for m in metrics_table.index if m in ml_dl_model_names], "RMSE"].idxmin()
     ablation_stages = [
@@ -1873,7 +1788,7 @@ def _evaluate_and_save_subset(subset, subset_artifact_dir, t_subset_start, train
     display(ablation_table.round(3))
 
     # ---------------- 9.3 Confidence-reliability analysis ----------------
-    # NOT probability calibration -- see compute_confidence_score / reliability_table in Section 7.
+    # Reliability check, not probability calibration (see reliability_table).
     conf_table, conf_reliability_gap = reliability_table(fusion_df, "pred_ConstrainedFusionVLM",
                                                           "confidence_score")
     print(f"\n[TITLE] {subset} — confidence-reliability analysis "
@@ -1893,11 +1808,8 @@ def _evaluate_and_save_subset(subset, subset_artifact_dir, t_subset_start, train
     ax.legend(); plt.show()
 
     # ---------------- 9.4 Terminal-phase-start detection ----------------
-    # TERMINAL_RUL_THRESHOLD identifies a terminal/critical RUL region and is used as an
-    # OPERATIONAL PROXY, not as ground-truth physical degradation onset. C-MAPSS provides no
-    # onset label, and no such label is fabricated here: this compares the VLM's visual
-    # terminal-phase-start estimate against a threshold-defined reference, and both are
-    # operational definitions rather than physical ground truth.
+    # Reference for the terminal phase: first cycle with RUL <= 30. C-MAPSS has no onset
+    # labels, so this is an operational reference, not ground truth.
     TERMINAL_RUL_THRESHOLD = 30
     def _proxy_terminal_phase_start(unit_id):
         g = test_norm[test_norm.unit == unit_id].sort_values("cycle")
@@ -2093,12 +2005,8 @@ def _evaluate_and_save_subset(subset, subset_artifact_dir, t_subset_start, train
         render_engine_report(uid)
         print()
 
-    # ---------------- 9.9 VLM evidence analysis: agreement, conflict, help/hurt -------------
-    # Diagnostic only. Compares the VLM-free number (pred_ConstrainedFusion) against the
-    # VLM-informed number (pred_ConstrainedFusionVLM) per engine to show WHERE the visual
-    # evidence helped, hurt, or did nothing -- reported honestly, including when the net effect
-    # is ~zero. No predictions are recomputed here and no method is re-selected using these
-    # numbers; this block only summarises results already fixed above.
+    # ---------------- 9.9 VLM effect diagnostics ----------------
+    # Per-engine comparison of constrained fusion with and without VLM evidence.
     banner(f"[TITLE] {subset} — VLM evidence diagnostics (agreement / conflict / help-hurt)")
 
     _err_no_vlm = (fusion_df["pred_ConstrainedFusion"] - fusion_df["true_rul"]).abs()
@@ -2151,7 +2059,7 @@ def _evaluate_and_save_subset(subset, subset_artifact_dir, t_subset_start, train
         print(f"  figures the VLM judged unreadable: {_unreadable*100:.1f}% "
               f"(high values on multi-regime subsets are an honest finding, not a bug)")
 
-    # worked examples: clearest help and clearest hurt on THIS subset
+    # example engines where the VLM helped or hurt most
     vlm_example_units = {}
     if (fusion_df["vlm_effect"] == "helped").any():
         vlm_example_units["most_helped"] = int(fusion_df.loc[fusion_df["vlm_delta_abs_err"].idxmin(), "unit"])
@@ -2433,9 +2341,9 @@ print(f"Per-subset artifacts (predictions, VLM/LLM JSON, graphs, metrics, plots,
 #   with a single MSE loss.
 # - **Explanations.** The case reports and LLM recommendations have not been validated against
 #   expert judgment.
-# - **Reproducibility.** Fixed seeds, greedy decoding, and deterministic cuDNN ensure run-to-run
-#   determinism on the same hardware and library versions. Results are specific to the 4-bit
-#   quantization configuration.
+# - **Reproducibility.** Seeds are fixed and VLM/LLM decoding is greedy. Repeated inference is
+#   checked per subset (`reproducibility_check.json`). Retraining the neural models on a GPU may
+#   give slightly different values, and results are specific to the 4-bit quantization setup.
 #
 # ## References
 #

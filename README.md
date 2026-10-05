@@ -97,7 +97,7 @@ If you find this useful, please cite:
 
 ```bibtex
 @misc{rafsan2026vlmrul,
-  author = {Rafsan, Md},
+  author = {Isdani, Md Rafsan},
   title  = {VLM-Assisted Prognostic Decision Framework for Remaining Useful Life Prediction},
   year   = {2026},
   url    = {https://github.com/Md-Rafsan-Isdani/C-MAPSS-VLM-Prognostics}

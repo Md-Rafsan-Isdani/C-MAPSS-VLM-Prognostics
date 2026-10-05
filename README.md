@@ -1,18 +1,31 @@
-# C-MAPSS-VLM-Prognostics
-VLM-assisted RUL prediction framework combining numerical models, Qwen2.5-VL visual analysis, and deterministic fusion on NASA C-MAPSS.
+# C-MAPSS VLM Prognostics
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Md-Rafsan-Isdani/C-MAPSS-VLM-Prognostics/blob/main/vlm_prognostics.ipynb)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-Code for a remaining useful life (RUL) prediction framework on the NASA C-MAPSS turbofan dataset. The idea is to combine standard ML/DL RUL models with a vision-language model (VLM) that looks at sensor trend plots the way an engineer would, and then check whether that visual evidence actually improves the prediction.
+Code for a remaining useful life (RUL) prediction framework on the NASA C-MAPSS turbofan dataset. It combines standard ML/DL RUL models with a vision-language model (VLM) that reads sensor trend plots the way an engineer would, and tests whether that visual evidence actually improves the prediction.
 
 ## How it works
 
-The pipeline has two branches that meet at a fusion step.
+```mermaid
+flowchart LR
+    A[C-MAPSS data] --> B[Preprocessing]
+    B --> C[8 ML/DL models]
+    A --> D[Sensor trend plots]
+    D --> E[Qwen2.5-VL-7B]
+    C --> F[Deterministic fusion]
+    E --> F
+    F --> G[Final RUL]
+    F --> H[Qwen2.5-7B evidence analysis]
+```
 
-1. **Numerical models.** Eight models are trained on the preprocessed sensor data: Linear Regression, Random Forest, XGBoost, BiLSTM, TCN, MS-TCN, MS-TCN+BiLSTM and a Transformer. Preprocessing includes dropping near-constant sensors, regime-wise normalization for FD002/FD004, RUL capping at 125 and 30-cycle sliding windows.
-2. **Visual branch.** For each test engine, the raw values of all 21 sensors are plotted and passed to Qwen2.5-VL-7B-Instruct. The VLM returns a structured JSON describing the degradation trend, abnormal sensors, where the terminal phase seems to start, and a qualitative RUL band (high / medium / low / critical).
+1. **Numerical models.** Eight models are trained on the preprocessed sensor data: Linear Regression, Random Forest, XGBoost, BiLSTM, TCN, MS-TCN, MS-TCN+BiLSTM and a Transformer. Preprocessing drops near-constant sensors, normalizes per operating regime for FD002/FD004, caps RUL at 125 and uses 30-cycle sliding windows.
+2. **Visual branch.** For each test engine, the raw values of all 21 sensors are plotted and passed to Qwen2.5-VL-7B-Instruct. The VLM returns a structured JSON with the degradation trend, abnormal sensors, where the terminal phase seems to start, and a qualitative RUL band (high / medium / low / critical).
 3. **Fusion.** The final RUL is calculated in Python, not by a language model. Each model is weighted by the inverse of its validation RMSE, outliers are removed with a MAD rule, and the VLM's RUL band can shift the weights by at most 15%.
 4. **Evidence analysis.** Qwen2.5-7B-Instruct reads the predictions, the VLM output and the fused result, and gives a short assessment with an accept / caution / reject recommendation. It has no way to change the number.
+
+Every method is scored the same way, so the comparison covers the 8 individual models, a simple average, a validation-weighted average, constrained fusion without the VLM, and constrained fusion with the VLM.
 
 ## Files
 
@@ -50,7 +63,11 @@ A full run over all four subsets takes a few hours, since both 7B models run onc
 
 To try things out quickly first, set `MAX_TEST_ENGINES_PER_SUBSET = 15`. These test runs are saved in a separate folder so they don't get mixed up with real results.
 
-Settings you might want to change:
+### Seeds
+
+The results in the paper are averaged over 3 seeds: 191, 1729 and 42. The notebook runs one seed at a time, so change `SEED` in the configuration cell and run it once per seed. Save or rename `/content/artifacts/` between runs, otherwise the next run will skip the finished subsets.
+
+### Settings you might want to change
 
 | Parameter | Default | What it does |
 |---|---|---|
@@ -76,19 +93,19 @@ The cross-subset comparison is saved in `/content/artifacts/summary/`.
 
 ## Results
 
+RMSE in cycles, mean over 3 seeds.
+
 | Method | FD001 | FD002 | FD003 | FD004 |
 |---|---|---|---|---|
 | Best single model | | | | |
 | Constrained fusion (numeric only) | | | | |
 | Constrained fusion + VLM | | | | |
 
-RMSE in cycles. Will be updated after the final runs.
-
 ## Notes and limitations
 
 - C-MAPSS has no label for when degradation actually starts. The VLM's terminal phase estimate is compared against the first cycle where RUL drops to 30 or below, which is a practical reference rather than ground truth.
 - The confidence score is a fixed weighted combination of model agreement and VLM output. It is not a calibrated probability.
-- Seeds are fixed and decoding is greedy, so runs repeat on the same hardware. Different GPUs or library versions can still shift the last few decimals.
+- Decoding is greedy and repeated inference gives identical results. Retraining the neural networks on a GPU can still give slightly different numbers, which is why results are averaged over 3 seeds.
 - The LLM explanations have not been checked against expert judgment yet.
 
 ## Citation
@@ -96,7 +113,7 @@ RMSE in cycles. Will be updated after the final runs.
 If you find this useful, please cite:
 
 ```bibtex
-@misc{rafsan2026vlmrul,
+@misc{isdani2026vlmrul,
   author = {Isdani, Md Rafsan},
   title  = {VLM-Assisted Prognostic Decision Framework for Remaining Useful Life Prediction},
   year   = {2026},
@@ -110,4 +127,4 @@ Thanks to the NASA Ames Prognostics Center of Excellence for the C-MAPSS dataset
 
 ## License
 
-MIT
+This project is released under the [MIT License](LICENSE).

@@ -19,7 +19,7 @@ The pipeline has two branches that meet at a fusion step.
 | File | Description |
 |---|---|
 | `vlm_prognostics.ipynb` | Main Colab notebook, runs FD001 to FD004 end to end |
-| `vlm_prognostics.py` | Same code as a plain Python script |
+| `main.py` | Same code as a plain Python script |
 
 ## Requirements
 

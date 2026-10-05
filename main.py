@@ -1105,11 +1105,7 @@ def load_real_vlm():
     vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         VLM_MODEL_ID, torch_dtype="auto", device_map="auto", quantization_config=quant_cfg)
     vlm_model.eval()
-    # min/max_pixels controls how many visual tokens the ViT spends on the image -- our composite
-    # multi-panel grids are dense (now with an added smoothed-trend line and gridlines, at higher
-    # dpi), so raise the ceiling further above the library default so that added detail survives
-    # resizing instead of being thrown away (per the official model card's documented
-    # min_pixels/max_pixels usage pattern). This does cost some extra latency per VLM call.
+    # Raise max_pixels so the dense multi-panel figures keep their detail after resizing
     vlm_processor = AutoProcessor.from_pretrained(
         VLM_MODEL_ID, min_pixels=256 * 28 * 28, max_pixels=2048 * 28 * 28)
     assert next(vlm_model.parameters()).is_cuda or DEVICE == "cpu", "VLM did not load onto CUDA"

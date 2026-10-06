@@ -33,7 +33,8 @@
 #    NOTES
 #    -----
 #      [!] An NVIDIA GPU is required (4-bit loading via bitsandbytes).
-#      [!] Run inside Jupyter or Colab (the notebook uses IPython.display).
+#      [!] Designed for Google Colab (data upload uses google.colab).
+#      [!] Dataset not included: download NASA C-MAPSS (CMAPSSData.zip) separately.
 #      [!] Bit-identical results also need the same GPU, driver and CUDA build.
 #
 #  ==========================================================================
@@ -75,5 +76,5 @@ tqdm==4.67.3
 
 
 #  ==========================================================================
-#   Author: Md Rafsan Isdani |  Michigan Technological University
+#   Author: Md Rafsan Isdani  |  Michigan Technological University
 #  ==========================================================================

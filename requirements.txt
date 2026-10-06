@@ -75,5 +75,5 @@ tqdm==4.67.3
 
 
 #  ==========================================================================
-#   Author: Md Rafsan  |  Michigan Technological University
+#   Author: Md Rafsan Isdani |  Michigan Technological University
 #  ==========================================================================

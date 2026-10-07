@@ -1,7 +1,7 @@
 # =============================================================================
-# make_paper_figures.py
+# generate_figures.py
 #
-# Regenerates the nine figures of the manuscript
+# Regenerates all ten figures of the manuscript
 #   "Reliability, Abstention and Operating-Regime Sensitivity of Vision-Language
 #    Model Evidence in Multimodal Prognostics: A Multi-Seed Study on NASA C-MAPSS"
 #
@@ -18,15 +18,16 @@
 #   (Word files containing the full printed log of each run; seed is read from the name).
 #
 # Figure -> manuscript mapping (file names match \registerfig in the .tex):
-#   fig1_rmse_all_methods.png        Fig. 1  test RMSE, all methods, all seeds
-#   fig9_seed_skill_radar.png        Fig. 2  relative skill radar per subset
-#   fig2_vlm_contribution.png        Fig. 3  RMSE change from VLM evidence
-#   fig5_help_hurt.png               Fig. 4  per-engine helped / hurt / no effect
-#   fig3_evidence_quality.png        Fig. 5  VLM evidence quality
-#   fig4_regime_association.png      Fig. 6  unreadability vs operating regimes
-#   fig8_evidence_radar.png          Fig. 7  evidence profile radar
-#   fig6_agreement.png               Fig. 8  VLM-numerical agreement (seed 42)
-#   fig7_confidence_reliability.png  Fig. 9  confidence score vs accuracy (seed 42)
+#   fig0_system_flowchart.png        Fig. 1   system flowchart (two-branch framework)
+#   fig1_rmse_all_methods.png        Fig. 2   test RMSE, all methods, all seeds
+#   fig9_seed_skill_radar.png        Fig. 3   relative skill radar per subset
+#   fig2_vlm_contribution.png        Fig. 4   RMSE change from VLM evidence
+#   fig5_help_hurt.png               Fig. 5   per-engine helped / hurt / no effect
+#   fig3_evidence_quality.png        Fig. 6   VLM evidence quality
+#   fig4_regime_association.png      Fig. 7   unreadability vs operating regimes
+#   fig8_evidence_radar.png          Fig. 8   evidence profile radar
+#   fig6_agreement.png               Fig. 9   VLM-numerical agreement (seed 42)
+#   fig7_confidence_reliability.png  Fig. 10  confidence score vs accuracy (seed 42)
 # =============================================================================
 
 REBUILD_FROM_LOGS = False          # True -> parse the three uploaded results .docx logs
@@ -400,9 +401,101 @@ def fig_confidence():
 
 
 
+def fig_flowchart():
+    """System architecture diagram (Fig. 1): components and data flow only."""
+    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Rectangle
+    W, H = 6.0, 3.32
+    INK, INK2 = '#0b0b0b', '#3f3e3b'
+    NUM, VIS, FUS, LLM, DAT = '#2a78d6', '#eb6834', '#138a5f', '#4a3aa7', '#77766f'
+    FILL = {NUM: '#ffffff', VIS: '#ffffff', FUS: '#e6f6ef', LLM: '#f3f1fb', DAT: '#f3f2ee'}
+    LANE = {NUM: '#eef4fd', VIS: '#fdf2ec'}
+
+    with plt.rc_context({'font.family': 'DejaVu Sans', 'mathtext.fontset': 'dejavusans'}):
+        fig = plt.figure(figsize=(W, H))
+        ax = fig.add_axes([0, 0, 1, 1]); ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis('off')
+        blocks = []
+
+        def lane(y0, y1, color, text):
+            ax.add_patch(Rectangle((0.98, y0), 3.0, y1 - y0, fc=LANE[color], ec='none', zorder=0))
+            ax.text(1.05, y1 - 0.11, text, ha='left', va='center', fontsize=6.4, fontweight='bold',
+                    color=color, zorder=1)
+
+        def block(x0, y0, x1, y1, color, title, sub=None, dashed=False, tsize=7.0, ssize=6.0):
+            ax.add_patch(FancyBboxPatch((x0, y0), x1 - x0, y1 - y0, boxstyle='round,pad=0,rounding_size=0.06',
+                                        fc=FILL[color], ec=color, lw=1.2, ls=(0, (4, 2)) if dashed else '-', zorder=2))
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            texts = []
+            if sub:
+                nt, ns = title.count('\n') + 1, sub.count('\n') + 1
+                lh_t, lh_s, g = tsize / 72 * 1.18, ssize / 72 * 1.22, 0.06
+                tot = nt * lh_t + g + ns * lh_s
+                top = cy + tot / 2
+                texts.append(ax.text(cx, top - nt * lh_t / 2, title, ha='center', va='center', fontsize=tsize,
+                                     fontweight='bold', color=INK, zorder=3, linespacing=1.15))
+                texts.append(ax.text(cx, top - nt * lh_t - g - ns * lh_s / 2, sub, ha='center', va='center',
+                                     fontsize=ssize, color=INK2, zorder=3, linespacing=1.2))
+            else:
+                texts.append(ax.text(cx, cy, title, ha='center', va='center', fontsize=tsize, fontweight='bold',
+                                     color=INK, zorder=3, linespacing=1.15))
+            blocks.append(((x0, y0, x1, y1), texts, title))
+            return x0, y0, x1, y1
+
+        def arrow(p0, p1, color='#55544f', dashed=False):
+            ax.add_patch(FancyArrowPatch(p0, p1, arrowstyle='-|>', mutation_scale=8.5, lw=1.0, color=color,
+                                         ls=(0, (3, 2)) if dashed else '-', zorder=1, shrinkA=0, shrinkB=0))
+
+        def tag(x, y, s, color=INK2):
+            ax.text(x, y, s, ha='center', va='center', fontsize=6.0, color=color, zorder=4,
+                    bbox=dict(boxstyle='round,pad=0.1', fc='white', ec='none', alpha=0.95))
+
+        # lanes ------------------------------------------------------------------
+        NY0, NY1 = 1.86, 3.22          # numerical lane
+        VY0, VY1 = 0.42, 1.78          # visual lane
+        lane(NY0, NY1, NUM, 'NUMERICAL BRANCH')
+        lane(VY0, VY1, VIS, 'VISUAL BRANCH')
+        ny, vy = (NY0 + NY1) / 2 - 0.06, (VY0 + VY1) / 2 - 0.06   # block centre lines
+
+        # blocks -----------------------------------------------------------------
+        D = block(0.06, 0.95, 0.86, 2.70, DAT, 'C-MAPSS\nsensor\ndata', 'FD001–FD004\n3 settings\n21 sensors')
+        P = block(1.08, ny - 0.36, 1.92, ny + 0.36, NUM, 'Preprocessing', None, tsize=6.5)
+        M = block(2.12, ny - 0.36, 3.86, ny + 0.36, NUM, 'Numerical RUL models',
+                  'Linear regression · Random forest\nXGBoost · BiLSTM · TCN · MS-TCN\nMS-TCN + BiLSTM · Transformer', ssize=5.8)
+        R = block(1.08, vy - 0.36, 1.92, vy + 0.36, VIS, 'Sensor-plot\nrenderer', None)
+        V = block(2.12, vy - 0.36, 3.02, vy + 0.36, VIS, 'VLM\nobserver', 'Qwen2.5-VL-\n7B-Instruct')
+        S = block(3.16, vy - 0.36, 3.86, vy + 0.36, VIS, 'Schema\ncheck', 'validate,\nre-prompt', ssize=5.7)
+        F = block(4.12, 0.94, 5.02, 2.62, FUS, 'Deterministic\nconstrained\nfusion', 'bounded VLM\nreweighting')
+        O = block(5.24, 1.42, 5.96, 2.22, FUS, 'RUL\nestimate', '+ confidence')
+        L = block(4.12, 0.0, 5.02, 0.66, LLM, 'Evidence-\nanalysis LLM', 'Qwen2.5-7B-\nInstruct', dashed=True, tsize=6.6, ssize=5.8)
+        C = block(5.24, 0.06, 5.96, 0.60, LLM, 'Accept /\ncaution /\nreject', None, dashed=True, tsize=6.1)
+
+        # flow -------------------------------------------------------------------
+        arrow((D[2], ny), (P[0], ny)); arrow((D[2], vy), (R[0], vy))
+        arrow((P[2], ny), (M[0], ny))
+        arrow((R[2], vy), (V[0], vy)); arrow((V[2], vy), (S[0], vy))
+        arrow((M[2], ny), (F[0], ny)); arrow((S[2], vy), (F[0], vy))
+        arrow((F[2], (O[1] + O[3]) / 2), (O[0], (O[1] + O[3]) / 2))
+        arrow(((F[0] + F[2]) / 2, F[1]), ((L[0] + L[2]) / 2, L[3]), LLM, dashed=True)
+        arrow((L[2], 0.33), (C[0], 0.33), LLM, dashed=True)
+        ax.text((F[0] + F[2]) / 2 + 0.07, (F[1] + L[3]) / 2, 'commentary only', ha='left', va='center', fontsize=5.9, style='italic', color=LLM, zorder=4)
+
+        # fit check --------------------------------------------------------------
+        fig.canvas.draw(); r = fig.canvas.get_renderer(); inv = ax.transData.inverted()
+        bad = []
+        for (x0, y0, x1, y1), texts, title in blocks:
+            for t in texts:
+                bb = inv.transform(t.get_window_extent(r))
+                if bb[0][0] < x0 + 0.03 or bb[1][0] > x1 - 0.03 or bb[0][1] < y0 + 0.02 or bb[1][1] > y1 - 0.02:
+                    bad.append(title.replace('\n', ' '))
+        print('text-fit problems:', bad or 'none')
+        fig.savefig(os.path.join(OUT, 'fig0_system_flowchart.png'), dpi=300, bbox_inches='tight', pad_inches=0.03)
+        fig.savefig(os.path.join(OUT, 'fig0_system_flowchart.pdf'), bbox_inches='tight', pad_inches=0.03)
+        plt.close(fig)
+        print('wrote fig0_system_flowchart.png / .pdf')
+
+
 # ----------------------------------------------------------------------------- run
 for make in (fig_rmse, fig_skill, fig_contrib, fig_helphurt, fig_quality,
-             fig_regime, fig_radar, fig_agreement, fig_confidence):
+             fig_regime, fig_radar, fig_agreement, fig_confidence, fig_flowchart):
     make()
 
 zip_path = OUT + ".zip"
@@ -414,4 +507,6 @@ try:
     from google.colab import files
     files.download(zip_path)
 except ImportError:
-    pass                                  # not running in Colab
+    # Only reached outside Colab (e.g. plain local Python), where google.colab does not
+    # exist. The figures are still saved in OUT; only the browser download is skipped.
+    pass

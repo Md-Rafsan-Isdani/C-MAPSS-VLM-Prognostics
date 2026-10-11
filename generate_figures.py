@@ -2,8 +2,7 @@
 # generate_figures.py
 #
 # Regenerates all ten figures of the manuscript
-#   "Reliability, Abstention and Operating-Regime Sensitivity of Vision-Language
-#    Model Evidence in Multimodal Prognostics: A Multi-Seed Study on NASA C-MAPSS"
+#   "Reliability, Abstention and Operating-Regime Sensitivity of Vision-Language Model Evidence from Turbofan Jet Engine Performance Data: A Multi-Seed Study on NASA C-MAPSS"
 #
 # >>> RUN THIS ON GOOGLE COLAB: paste the whole file into ONE Colab cell and run. <<<
 #     No GPU is needed (CPU runtime is fine). Output: /content/paper_figures/
